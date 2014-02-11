@@ -1,3 +1,4 @@
+library(lars)
 # gene_word_matrix_2011 downloaded from grail download site @ broad institute
 # then cut -f 1 gene_word_matrix_2011 | sort | uniq -c > genecounts
 gc <- read.table('genecounts', stringsAsFactors=FALSE)
@@ -64,12 +65,18 @@ first.matrix <- model.matrix(~ first.letter, data=y)[,-1]
 z <- cbind(y[c('count', 'name.length', 'num.digits', 'entrez.low')], family.matrix, first.matrix)
 
 z$entrez.low <- NULL
-model <- lm(log(count) ~ ., data=z)
-model.step <- step(model)
+# too slow
+#model <- lm(log(count) ~ ., data=z)
+#model.step <- step(model)
 
 preds <- data.matrix(z[-match('count', names(z))])
 #lac <- cv.lars(preds, log(z$count), trace=TRUE)
 la <- lars(preds, z$count, trace=TRUE)
-coef <- coef(la, s=10)
+log.la <- lars(preds, log(z$count), trace=TRUE)
+lcoef <- coef(la, s=14)
+lcoef <- lcoef[lcoef != 0]
+
+log.coef <- coef(log.la, s=14)
+log.coef <- log.coef[log.coef != 0]
 
 
