@@ -98,22 +98,81 @@ add.lat.long <- function(sc,
 
 make.plots <- function() {
     sc <- load.school.data()
+
+    # county mean APIs
+    library(plotrix)
+    m <- map('county', 'california', plot=FALSE)
+
+    median.api <- tapply(sc$API12B, sc$CNAME, median)
+    # wow, ca has an entire county with only ~1000 people in it south of tahoe
+    # no schools? so impute to median
+    median.api['Alpine'] <- median(sc$API12B)
+    median.api <- median.api[order(names(median.api))]
+
+    #state.col<-color.scale(median.api,c(1,1,0),c(0,1,1),0)
+    colors <- color.gradient(c(1,1,0),c(0,1,1),0, 10)
+
+    # this is ugly
+    api.bucket <- as.numeric(cut(median.api, 10))
+    labs <- levels(cut(median.api, 10))
+    ints <- cbind(lower = as.numeric( sub("\\((.+),.*", "\\1", labs) ),
+            upper = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", labs) ))
+    midpoints <- round(ints[,1] + .5*(ints[,2] - ints[,1]))
+    map("county", "california", fill=TRUE, col=colors[api.bucket])
+    legend('topright', legend=midpoints, fill=colors)
+
+
+    
+    # doesn't really improve prediction
+    #sc$my.avg.ed <- with(sc, (NOT_HSG + 2*HSG + 3*SOME_COL + 4*COL_GRAD + 5*GRAD_SCH)*PCT_RESP/10000 )
+
     ba <- add.lat.long(sc)
 
-    # probably have to deal with edge effects more reasonably than I do here (would be easy to score a API 999 school as "bad"
-    mod <- lm(API12B ~ AVG_ED +PCT_AS + PCT_AI + PCT_AA + PCT_HI + PCT_FI + PCT_PI+ PCT_MR, data=ba)
-    preds <- predict(mod)
-    ba$residual <-  ba$API12B - preds
-    cuts <- quantile(ba$residual, c(0.05, 0.95)) 
-    bad <- ba$residual < cuts[1]
-    good <- ba$residual > cuts[2]
-    plot(ba$lon, ba$lat, pch=20, xlab='longitude', ylab='latitude', )
-    points(ba$lon[bad], ba$lat[bad], pch=20, col='red')
-    points(ba$lon[good], ba$lat[good], pch=20, col='green')
+    # just Santa Clara / San Mateo
+    silicon.valley <- subset(ba, CNAME %in% c('San Mateo', 'Santa Clara'))
+    # remove blank school names
+    silicon.valley <- subset(silicon.valley, SNAME != '')
 
-    tab <- rbind(table(subset(ba, good)$CNAME), 
-        table(subset(ba, !good & !bad)$CNAME),
-        table(subset(ba, bad)$CNAME))
+    library(gooleVis)
+    silicon.valley$LatLong <- paste(silicon.valley$lat, ':', silicon.valley$lon, sep='')
+
+    # use as predictors
+    # * average parental education
+    # * percent of parents responding
+    # * ethnic percentages
+    # * school type (high schools have much worse APIs)
+    
+    mod <- lm(API12B ~ AVG_ED + PCT_RESP + PCT_AS + PCT_AI + PCT_AA + PCT_HI + PCT_FI + PCT_PI+ PCT_MR + STYPE, data=silicon.valley)
+
+    # probably have to deal with edge effects more reasonably than I do here (would be easy to score a API 999 school as "bad"
+    #mod <- lm(API12B ~ AVG_ED + PCT_RESP + PCT_AS + PCT_AI + PCT_AA + PCT_HI + PCT_FI + PCT_PI+ PCT_MR, data=ba)
+    preds <- predict(mod)
+    silicon.valley$residual <-  silicon.valley$API12B - preds
+    # we've essentially recapitulated the "similar schools ranking" from the API dataset 
+    boxplot(silicon.valley$residual ~ as.numeric(silicon.valley$SIM_RANK)
+
+    cuts <- quantile(silicon.valley$residual, c(0.05, 0.95)) 
+    bad <- silicon.valley$residual < cuts[1]
+    good <- silicon.valley$residual > cuts[2]
+
+    silicon.valley$title <- sprintf('%s<BR>API=%s<BR>PREDICTED=%s<BR>SIM_RANK=%s', silicon.valley$SNAME, silicon.valley$API12B, round(preds), silicon.valley$SIM_RANK)
+
+
+    m1 <- gvisMap(silicon.valley, "LatLong", 'title', options=list(enableScrollWheel=TRUE, showTip=TRUE, mapType='normal')) 
+    m.good <- gvisMap(silicon.valley[good,], "LatLong", 'title', options=list(enableScrollWheel=TRUE, showTip=TRUE, mapType='normal')) 
+    m.bad <- gvisMap(silicon.valley[bad,], "LatLong", 'title', options=list(enableScrollWheel=TRUE, showTip=TRUE, mapType='normal')) 
+
+
+
+
+    plot(silicon.valley$lon, silicon.valley$lat, pch=20, xlab='longitude', ylab='latitude', )
+    points(silicon.valley$lon[bad], silicon.valley$lat[bad], pch=20, col='red')
+    points(silicon.valley$lon[good], silicon.valley$lat[good], pch=20, col='green')
+
+    # by county, no longer so useful when I've only got two counties
+    tab <- rbind(table(subset(silicon.valley, good)$CNAME), 
+        table(subset(silicon.valley, !good & !bad)$CNAME),
+        table(subset(silicon.valley, bad)$CNAME))
     rownames(tab) <- c('good', 'middle', 'bad')
 
 }
